@@ -1,4 +1,5 @@
 ﻿using AIS.SaveLoad;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Channels;
 
@@ -28,7 +29,7 @@ public interface IInventoryData<T>
 
 public class ItemData : IInventoryData<int>
 {
-    public int Quantity { get; private set; } = 0;
+    public int Quantity { get; set; } = 0;
     
     public ItemData()
     {
@@ -87,8 +88,10 @@ internal class AsyncBooleanGate
 public interface ISaveData<T>
 {
     string Version { get; set; }
-    
+
+
     void Initialize(string version, Dictionary<IItem, IInventoryData<T>> inventory);
+    Dictionary<IItem, IInventoryData<T>> GetInventory();
 }
 
 namespace AIS.SaveLoad
@@ -119,7 +122,16 @@ namespace AIS.SaveLoad
                     kvp => Convert.ToInt32(kvp.Value.Quantity) // Value: quantity as int
                 );
         }
-        
+
+        public Dictionary<IItem, IInventoryData<int>> GetInventory()
+        {
+            return Inventory.ToDictionary(
+                kvp => (IItem)new Item(kvp.Key),
+                kvp => (IInventoryData<int>)new ItemData { Quantity = kvp.Value }
+            );
+        }
+
+
         public IntInventorySaveData()
         {
             
@@ -128,8 +140,8 @@ namespace AIS.SaveLoad
 }
 
 
-public delegate void UpdatedInventoryHandler(HashSet<IItem> ChangedItem);
-public delegate void UpdatedInventoryTagHandler(string ChangedTag, HashSet<IItem> TagHashSet);
+public delegate void UpdatedInventoryHandler<TKey>(HashSet<TKey> ChangedItem);
+public delegate void UpdatedInventoryTagHandler<TKey>(string ChangedTag, HashSet<TKey> TagHashSet);
 
 namespace AIS
 {
@@ -141,21 +153,22 @@ namespace AIS
     /// </summary>
     public class InventorySystem<TKey, TValue, TAmount, TSave>
         where TKey : IItem
-        where TValue : IInventoryData<TAmount>
+        where TValue : IInventoryData<TAmount>, new()
+        where TAmount : struct
         where TSave : ISaveData<TAmount>, new()
     {
         /// <summary>
         /// Event triggered whenever the inventory is updated.
         /// </summary>
         ///  /// <param name="ChangedID">The set of item IDs that were added, removed, or updated.</param>
-        public event UpdatedInventoryHandler UpdatedInventory = delegate { };
+        public event UpdatedInventoryHandler<TKey> UpdatedInventory = delegate { };
 
         /// <summary>
         /// Event triggered whenever items under a specific tag are updated.
         /// </summary>
         /// <param name="ChangedTag">The tag whose items were updated.</param>
         /// <param name="TagHashSet">The set of all item IDs that belong to the updated tag.</param>
-        public event UpdatedInventoryTagHandler UpdatedInventoryTag = delegate { };
+        public event UpdatedInventoryTagHandler<TKey> UpdatedInventoryTag = delegate { };
 
         internal Func<TSave, Dictionary<TKey, TValue>>? VersionControlFunction;
         private readonly AsyncBooleanGate _UpdateLoopGate = new();
@@ -168,7 +181,7 @@ namespace AIS
 
         internal Dictionary<TKey, string> TagLookUpTable = new();
         internal Dictionary<string, HashSet<TKey>> TagHashSet = new();
-        private Channel<InventoryChange<TAmount>> _InventoryChannel = Channel.CreateUnbounded<InventoryChange<TAmount>>();
+        private Channel<InventoryChange<TKey, TAmount>> _InventoryChannel = Channel.CreateUnbounded<InventoryChange<TKey, TAmount>>();
 
         public InventorySystem()
         {
@@ -242,7 +255,7 @@ namespace AIS
                         Inventory.TryGetValue(kvp.Key, out var dictionarydata)
                     )
                     {
-                        if(!dictionarydata.Check(kvp.Value.Quantity))
+                        if(!dictionarydata.Check(kvp.Value))
                         {
                             SuccessfulCheckFlag = false;
                             break;
@@ -292,7 +305,7 @@ namespace AIS
         /// <returns>True if the item exists, false otherwise</returns>
         public bool SingleItemCheck(TKey item)
         {
-            return SingleItemCheck(item, 0);
+            return SingleItemCheck(item, default);
         }
 
         /// <summary>
@@ -322,7 +335,7 @@ namespace AIS
         /// <returns>True if all items exist, false otherwise.</returns>
         public bool MultiItemCheck(List<TKey> item)
         {
-            return MultiItemCheck(item, 0);
+            return MultiItemCheck(item, default);
         }
 
         /// <summary>
@@ -476,11 +489,15 @@ namespace AIS
         {
             await AwaitCurrentChannelQueue();
 
-            Dictionary<TKey, TValue> inventorySnapshot;
+            Dictionary<IItem, IInventoryData<TAmount>> inventorySnapshot;
 
             lock (Inventory)
             {
-                inventorySnapshot = new Dictionary<TKey, TValue>(Inventory);
+                inventorySnapshot = new Dictionary<IItem, IInventoryData<TAmount>>
+                    (Inventory.ToDictionary(
+                        kvp => (IItem)kvp.Key,
+                        kvp => (IInventoryData<TAmount>)kvp.Value
+                    ));
             }
             
             TSave saveData = new();
@@ -527,7 +544,11 @@ namespace AIS
                 switch (saveData.Version)
                 {
                     case Constants.BaseVersion:
-                        Inventory = new Dictionary<TKey, TValue>(saveData.Inventory);
+                        Inventory = new Dictionary<TKey, TValue>(saveData.GetInventory()
+                            .ToDictionary(
+                                kvp => (TKey)kvp.Key,
+                                kvp => (TValue)kvp.Value
+                            ));
                         break;
 
                     default:
@@ -571,9 +592,10 @@ namespace AIS.Display
     /// Derive from this class to implement custom inventory displays.
     /// </summary>
     public class InventoryDisplay<TKey, TValue, TAmount, TSave>
-        where TKey : IItem
-        where TValue : IInventoryData<TAmount>
-        where TSave : ISaveData<TAmount>
+        where TKey : IItem, new()
+        where TValue : IInventoryData<TAmount>, new()
+        where TAmount : struct
+        where TSave : ISaveData<TAmount>, new()
     {
         protected readonly InventorySystem<TKey, TValue, TAmount, TSave> _InventorySystem;
 
