@@ -2,10 +2,64 @@
 using System.Text.Json;
 using System.Threading.Channels;
 
-internal readonly record struct InventoryChange(
-    IReadOnlyList<KeyValuePair<int, int>> ChangeList,
+public interface IItem
+{
+    int ID { get; }
+}
+
+public class Item : IItem
+{
+	public int ID { get; private set; }
+	
+	public Item (int id)
+	{
+		ID = id;
+	}
+}
+
+public interface IInventoryData<T>
+{
+    T Quantity { get; }
+    
+    void Add(T amount);
+    bool Check (T amount);
+    bool ZeroCheck();
+}
+
+public class ItemData : IInventoryData<int>
+{
+    public int Quantity { get; private set; } = 0;
+    
+    public ItemData()
+    {
+        
+    }
+    
+    public void Add(int Amount)
+    {
+        Quantity += Amount;
+    }
+    
+    public bool Check(int Amount)
+    {
+        return Quantity >= Amount;
+    }
+    
+    public bool ZeroCheck()
+    {
+        return Quantity <= 0;
+    }
+}
+
+internal readonly record struct InventoryChange<TKey, TAmount>(
+    IReadOnlyList<KeyValuePair<TKey, TAmount>> ChangeList,
     TaskCompletionSource<bool>? Response = null
 );
+
+internal class Constants
+{
+    internal const string BaseVersion = "V1.0";
+}
 
 internal class AsyncBooleanGate
 {
@@ -30,6 +84,13 @@ internal class AsyncBooleanGate
     }
 }
 
+public interface ISaveData<T>
+{
+    string Version { get; set; }
+    
+    void Initialize(string version, Dictionary<IItem, IInventoryData<T>> inventory);
+}
+
 namespace AIS.SaveLoad
 {
     /// <summary>
@@ -37,25 +98,38 @@ namespace AIS.SaveLoad
     /// Contains the version of the save file and a snapshot of all item quantities.
     /// Use this class when saving or loading inventory to/from JSON files.
     /// </summary>
-    public class InventorySaveData
+    public class IntInventorySaveData : ISaveData<int>
     {
-        internal const string BaseVersion = "V1.0";
-
         /// <summary>
         /// The version of the save data.
         /// </summary>
-        public string Version = BaseVersion;
+        public string Version { get; set; } = Constants.BaseVersion;
 
         /// <summary>
         /// A dictionary mapping item IDs to their quantities.
         /// </summary>
         public Dictionary<int, int> Inventory { get; set; } = new();
+        
+        public void Initialize(string version, Dictionary<IItem, IInventoryData<int>> inventory)
+        {
+            Version = version;
+            Inventory = inventory.ToDictionary
+                (
+                    kvp => kvp.Key.ID,                         // Key: item ID
+                    kvp => Convert.ToInt32(kvp.Value.Quantity) // Value: quantity as int
+                );
+        }
+        
+        public IntInventorySaveData()
+        {
+            
+        }
     }
 }
 
 
-public delegate void UpdatedInventoryHandler(HashSet<int> ChangedID);
-public delegate void UpdatedInventoryTagHandler(string ChangedTag, HashSet<int> TagHashSet);
+public delegate void UpdatedInventoryHandler(HashSet<IItem> ChangedItem);
+public delegate void UpdatedInventoryTagHandler(string ChangedTag, HashSet<IItem> TagHashSet);
 
 namespace AIS
 {
@@ -65,7 +139,10 @@ namespace AIS
     /// private set only allowing modifications with Add/Remove Functions.
     /// public get will not include changes still awaiting to be processed.
     /// </summary>
-    public class InventorySystem
+    public class InventorySystem<TKey, TValue, TAmount, TSave>
+        where TKey : IItem
+        where TValue : IInventoryData<TAmount>
+        where TSave : ISaveData<TAmount>, new()
     {
         /// <summary>
         /// Event triggered whenever the inventory is updated.
@@ -80,18 +157,18 @@ namespace AIS
         /// <param name="TagHashSet">The set of all item IDs that belong to the updated tag.</param>
         public event UpdatedInventoryTagHandler UpdatedInventoryTag = delegate { };
 
-        internal Func<InventorySaveData, Dictionary<int, int>>? VersionControlFunction;
+        internal Func<TSave, Dictionary<TKey, TValue>>? VersionControlFunction;
         private readonly AsyncBooleanGate _UpdateLoopGate = new();
         private readonly SemaphoreSlim _SaveLoadSemaphore = new(1, 1);
 
         /// <summary>
         /// The current inventory mapping item IDs to their quantities.
         /// </summary>
-        public Dictionary<int, int> Inventory { get; private set; } = new();
+        public Dictionary<TKey, TValue> Inventory { get; private set; } = new();
 
-        internal Dictionary<int, string> TagLookUpTable = new();
-        internal Dictionary<string, HashSet<int>> TagHashSet = new();
-        private Channel<InventoryChange> _InventoryChannel = Channel.CreateUnbounded<InventoryChange>();
+        internal Dictionary<TKey, string> TagLookUpTable = new();
+        internal Dictionary<string, HashSet<TKey>> TagHashSet = new();
+        private Channel<InventoryChange<TAmount>> _InventoryChannel = Channel.CreateUnbounded<InventoryChange<TAmount>>();
 
         public InventorySystem()
         {
@@ -122,8 +199,8 @@ namespace AIS
         {
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            _InventoryChannel.Writer.TryWrite(new InventoryChange(
-                ChangeList: Array.Empty<KeyValuePair<int, int>>(),
+            _InventoryChannel.Writer.TryWrite(new InventoryChange<TKey, TAmount>(
+                ChangeList: Array.Empty<KeyValuePair<TKey, TAmount>>(),
                 Response: tcs
             ));
 
@@ -136,7 +213,7 @@ namespace AIS
             {
                 await _UpdateLoopGate.Wait();
 
-                while (_InventoryChannel.Reader.TryRead(out InventoryChange Change))
+                while (_InventoryChannel.Reader.TryRead(out InventoryChange<TKey, TAmount> Change))
                 {
                     bool SuccessfullInventoryChange = false;
                     bool SuccessfullCheckFlag = ItemRemoveCheck(Change);
@@ -152,18 +229,26 @@ namespace AIS
             }
         }
 
-        private bool ItemRemoveCheck(InventoryChange Change)
+        private bool ItemRemoveCheck(InventoryChange<TKey, TAmount> Change)
         {
             bool SuccessfulCheckFlag = true;
 
-            if (Change.Response != null)    // Bypass for add function that cannot remove items
+            if (Change.Response != null)    // Bypass for ForcedAddRemoveItem
             {
                 foreach (var kvp in Change.ChangeList)
                 {
-                    int CurrentAmount = Inventory.TryGetValue(kvp.Key, out var dictionarydata) ? dictionarydata : 0;
-                    int NewAmount = CurrentAmount + kvp.Value;
-
-                    if (NewAmount < 0)
+                    if
+                    (
+                        Inventory.TryGetValue(kvp.Key, out var dictionarydata)
+                    )
+                    {
+                        if(!dictionarydata.Check(kvp.Value.Quantity))
+                        {
+                            SuccessfulCheckFlag = false;
+                            break;
+                        }
+                    }
+                    else
                     {
                         SuccessfulCheckFlag = false;
                         break;
@@ -174,38 +259,25 @@ namespace AIS
             return SuccessfulCheckFlag;
         }
 
-        private void UpdateValueOfInventory(InventoryChange Change)
+        private void UpdateValueOfInventory(InventoryChange<TKey, TAmount> Change)
         {
-            HashSet<int> ChangedID = new();
+            HashSet<TKey> ChangedItem = new();
             HashSet<string> ChangedTag = new();
 
             foreach (var kvp in Change.ChangeList)
             {
-                ChangedID.Add(kvp.Key);
+                ChangedItem.Add(kvp.Key);
                 if (TagLookUpTable.TryGetValue(kvp.Key, out var tagdictionaryvalue)) { ChangedTag.Add(tagdictionaryvalue); }
-
-                int CurrentAmount = Inventory.TryGetValue(kvp.Key, out var dictionarydata) ? dictionarydata : 0;
-                int NewAmount;
-                try
-                {
-                    NewAmount = checked(CurrentAmount + kvp.Value);
-                }
-                catch (OverflowException)
-                {
-                    NewAmount = int.MaxValue;
-                }
-
-                if (NewAmount <= 0)
-                {
-                    Inventory.Remove(kvp.Key);
-                }
-                else
-                {
-                    Inventory[kvp.Key] = NewAmount;
-                }
+                
+                if(!Inventory.ContainsKey(kvp.Key))
+                    { Inventory[kvp.Key] = new(); }
+                
+                Inventory[kvp.Key].Add(kvp.Value);
+                if(Inventory[kvp.Key].ZeroCheck())
+                    { Inventory.Remove(kvp.Key); }
             }
 
-            UpdatedInventory?.Invoke(ChangedID);
+            UpdatedInventory?.Invoke(ChangedItem);
             foreach (string Tag in ChangedTag) 
             {
                 UpdatedInventoryTag?.Invoke(Tag, TagHashSet[Tag]);
@@ -218,9 +290,9 @@ namespace AIS
         /// </summary>
         /// <param name="ID">The item ID to check.</param>
         /// <returns>True if the item exists, false otherwise</returns>
-        public bool SingleItemCheck(int ID)
+        public bool SingleItemCheck(TKey item)
         {
-            return SingleItemCheck(ID, 0);
+            return SingleItemCheck(item, 0);
         }
 
         /// <summary>
@@ -230,10 +302,16 @@ namespace AIS
         /// <param name="ID">The item ID to check.</param>
         /// <param name="GreaterThan">Minimum quantity required.</param>
         /// <returns>True if the quantity is greater than the specified amount.</returns>
-        public bool SingleItemCheck(int ID, int GreaterThan)
+        public bool SingleItemCheck(TKey item, TAmount CompareAmount)
         {
-            int CurrentAmount = Inventory.TryGetValue(ID, out var dictionarydata) ? dictionarydata : 0;
-            return CurrentAmount > GreaterThan;
+            if(Inventory.TryGetValue(item, out var dictionarydata))
+            {
+                return dictionarydata.Check(CompareAmount);
+            }
+            else
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -242,9 +320,9 @@ namespace AIS
         /// </summary>
         /// <param name="ID">List of item IDs to check.</param>
         /// <returns>True if all items exist, false otherwise.</returns>
-        public bool MultiItemCheck(List<int> ID)
+        public bool MultiItemCheck(List<TKey> item)
         {
-            return MultiItemCheck(ID, 0);
+            return MultiItemCheck(item, 0);
         }
 
         /// <summary>
@@ -254,9 +332,9 @@ namespace AIS
         /// <param name="ID">List of item IDs to check.</param>
         /// <param name="GreaterThan">Minimum quantity required for each item.</param>
         /// <returns>True if all items meet the quantity requirement.</returns>
-        public bool MultiItemCheck(List<int> ID, int GreaterThan)
+        public bool MultiItemCheck(List<TKey> item, TAmount CompareAmount)
         {
-            return ID.All(_ID => Inventory.TryGetValue(_ID, out var dictionarydata) && dictionarydata > GreaterThan);
+            return item.All(_item => Inventory.TryGetValue(_item, out var dictionarydata) && dictionarydata.Check(CompareAmount));
         }
 
         /// <summary>
@@ -265,14 +343,14 @@ namespace AIS
         /// </summary>
         /// <param name="CheckPair">List of item ID and quantity pairs.</param>
         /// <returns>True if all items meet the required quantity.</returns>
-        public bool MultiItemCheck(List<KeyValuePair<int, int>> CheckPair) 
+        public bool MultiItemCheck(List<KeyValuePair<TKey, TAmount>> CheckPair) 
         {
             foreach (var kvp in CheckPair) 
             {
-                int CurrentAmount = Inventory.TryGetValue(kvp.Key, out var dictionarydata) ? dictionarydata : 0;
-                if (CurrentAmount < kvp.Value) 
-                {
-                    return false;
+                if(Inventory.TryGetValue(kvp.Key, out var dictionarydata))
+                { 
+                    if (!dictionarydata.Check(kvp.Value)) 
+                        { return false; }
                 }
             }
             return true;
@@ -280,65 +358,57 @@ namespace AIS
 
         /// <summary>
         /// Adds a single item to the inventory.
+        /// Bypasses any Check on if the inventory accepts the change.
         /// </summary>
-        /// <param name="ItemID">The ID of the item to add.</param>
-        /// <param name="Amount">The amount to add (must be positive).</param>
-        public void AddItem(int ItemID, int Amount)
+        /// <param name="ChangeItem">The Item to be changed</param>
+        /// <param name="Amount">The amount to add/remove.</param>
+        public void ForceAddRemoveItem(TKey ChangeItem, TAmount Amount)
         {
-            var ChangeList = new List<KeyValuePair<int, int>>
+            var ChangeList = new List<KeyValuePair<TKey, TAmount>>
             {
-                new(ItemID, Amount)
+                new(ChangeItem, Amount)
             };
 
-            AddItem(ChangeList);
+            AddRemoveItem(ChangeList);
         }
 
         /// <summary>
         /// Adds multiple items to the inventory.
+        /// Bypasses any Check on if the inventory accepts the change.
         /// </summary>
-        /// <param name="Change_List">List of item ID and amount pairs (amounts must be positive).</param>
-        public void AddItem(List<KeyValuePair<int, int>> ChangeList) 
+        /// <param name="ChangeList">List of item and amount pairs.</param>
+        public void AddRemoveItem(List<KeyValuePair<TKey, TAmount>> ChangeList) 
         {
-            if (ChangeList.Any(kvp => kvp.Value <= 0))
-                throw new ArgumentOutOfRangeException("AddItem only accepts positive Values, use TryRemoveItem for removing Items from the Inventory.");
-        
-
-            _InventoryChannel.Writer.TryWrite(new InventoryChange(ChangeList));
+            _InventoryChannel.Writer.TryWrite(new InventoryChange<TKey, TAmount>(ChangeList));
         }
 
         /// <summary>
-        /// Attempts to remove a single item from the inventory asynchronously.
+        /// Attempts to change a single item from the inventory.
         /// </summary>
-        /// <param name="ItemID">The item ID to remove.</param>
-        /// <param name="Amount">The amount to remove (must be positive).</param>
-        /// <returns>True if removal succeeded, false if not enough items exist.</returns>
-        public Task<bool> TryRemoveItem(int ItemID, int Amount)
+        /// <param name="ChangeItem">The item to be changed.</param>
+        /// <param name="Amount">The amount to add/remove.</param>
+        /// <returns>True if change succeeded</returns>
+        public Task<bool> TryAddRemoveItem(TKey ChangeItem, TAmount Amount)
         {
-            var ChangeList = new List<KeyValuePair<int, int>>
+            var ChangeList = new List<KeyValuePair<TKey, TAmount>>
             {
-                new(ItemID, Amount)
+                new(ChangeItem, Amount)
             };
 
-            return TryRemoveItem(ChangeList);
+            return TryAddRemoveItem(ChangeList);
         }
 
         /// <summary>
         /// Attempts to remove multiple items from the inventory asynchronously.
-        /// Does not partially remove items, if any item isnt avialable no items get removed.
+        /// Does not partially change inventory data, if the check on an item fails no inventory data gets changed.
         /// </summary>
-        /// <param name="Change_List">List of item ID and amount pairs (amounts must be positive).</param>
-        /// <returns>True if all removals succeeded, false if any item could not be removed.</returns>
-        public Task<bool> TryRemoveItem(List<KeyValuePair<int, int>> ChangeList)
+        /// <param name="ChangeList">List of item and amount pairs.</param>
+        /// <returns>True if all changes succeeded</returns>
+        public Task<bool> TryAddRemoveItem(List<KeyValuePair<TKey, TAmount>> ChangeList)
         {
-            if (ChangeList.Any(kvp => kvp.Value <= 0))
-                throw new ArgumentOutOfRangeException("TryRemoveItem only accepts positive Values, use AddItem for adding Items to the Inventory.");
-
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var negatedChangeList = ChangeList
-                .Select(kvp => new KeyValuePair<int, int>(kvp.Key, -kvp.Value))
-                .ToList();
 
-            if(!_InventoryChannel.Writer.TryWrite(new InventoryChange(negatedChangeList, tcs)))
+            if(!_InventoryChannel.Writer.TryWrite(new InventoryChange<TKey, TAmount>(ChangeList, tcs)))
             {
                 tcs.SetException(new InvalidOperationException("Channel is closed."));
             }
@@ -350,7 +420,7 @@ namespace AIS
         /// Sets a custom version control function to convert old save files to the current format.
         /// </summary>
         /// <param name="versionControlFunction">A function taking an old save and returning a current inventory dictionary.</param>
-        public void SetVersionControlFunction(Func<InventorySaveData, Dictionary<int, int>> versionControlFunction)
+        public void SetVersionControlFunction(Func<TSave, Dictionary<TKey, TValue>> versionControlFunction)
         {
             VersionControlFunction = versionControlFunction;
         }
@@ -359,7 +429,7 @@ namespace AIS
         /// Sets the tag lookup table for items.
         /// </summary>
         /// <param name="ExternalTagLookUpTable">Dictionary mapping item IDs to tags.</param>
-        public void SetTagLookUpTable(Dictionary<int, string> ExternalTagLookUpTable) 
+        public void SetTagLookUpTable(Dictionary<TKey, string> ExternalTagLookUpTable) 
         {
             TagLookUpTable = ExternalTagLookUpTable;
             SetTagHashSet();
@@ -381,7 +451,7 @@ namespace AIS
         /// <param name="FilePath">The path to the save file.</param>
         public async Task Save(string FilePath)
         {
-            await Save(FilePath, InventorySaveData.BaseVersion);
+            await Save(FilePath, Constants.BaseVersion);
         }
 
         /// <summary>
@@ -406,18 +476,15 @@ namespace AIS
         {
             await AwaitCurrentChannelQueue();
 
-            Dictionary<int, int> inventorySnapshot;
+            Dictionary<TKey, TValue> inventorySnapshot;
 
             lock (Inventory)
             {
-                inventorySnapshot = new Dictionary<int, int>(Inventory);
+                inventorySnapshot = new Dictionary<TKey, TValue>(Inventory);
             }
-
-            var saveData = new InventorySaveData
-            {
-                Version = GameVersion,
-                Inventory = inventorySnapshot
-            };
+            
+            TSave saveData = new();
+            saveData.Initialize(GameVersion, inventorySnapshot);
 
             string TempFilePath = $"{FilePath}.tmp";
             string BackupFilePath = $"{FilePath}.bak";
@@ -450,7 +517,7 @@ namespace AIS
                 throw new FileNotFoundException("Save file not found.", FilePath);
 
             var json = await File.ReadAllTextAsync(FilePath);
-            var saveData = JsonSerializer.Deserialize<InventorySaveData>(json);
+            var saveData = JsonSerializer.Deserialize<TSave>(json);
             if (saveData == null) return;
 
             await FlushChannel();
@@ -459,8 +526,8 @@ namespace AIS
             {
                 switch (saveData.Version)
                 {
-                    case InventorySaveData.BaseVersion:
-                        Inventory = new Dictionary<int, int>(saveData.Inventory);
+                    case Constants.BaseVersion:
+                        Inventory = new Dictionary<TKey, TValue>(saveData.Inventory);
                         break;
 
                     default:
@@ -503,11 +570,14 @@ namespace AIS.Display
     /// </list>
     /// Derive from this class to implement custom inventory displays.
     /// </summary>
-    public class InventoryDisplay 
+    public class InventoryDisplay<TKey, TValue, TAmount, TSave>
+        where TKey : IItem
+        where TValue : IInventoryData<TAmount>
+        where TSave : ISaveData<TAmount>
     {
-        protected readonly InventorySystem _InventorySystem;
+        protected readonly InventorySystem<TKey, TValue, TAmount, TSave> _InventorySystem;
 
-        public InventoryDisplay(InventorySystem inventory)
+        public InventoryDisplay(InventorySystem<TKey, TValue, TAmount, TSave> inventory)
         {
             _InventorySystem = inventory;
 
@@ -519,7 +589,7 @@ namespace AIS.Display
         /// Called whenever the inventory is updated.
         /// </summary>
         /// <param name="ChangedID">The set of item IDs that were added, removed, or modified.</param>
-        protected virtual void OnInventoryUpdated(HashSet<int> ChangedID)
+        protected virtual void OnInventoryUpdated(HashSet<TKey> ChangedItem)
         {
 
         }
@@ -529,7 +599,7 @@ namespace AIS.Display
         /// </summary>
         /// <param name="ChangedTag">The tag that was updated.</param>
         /// <param name="TagHashSet">The set of all item IDs under the tag.</param>
-        protected virtual void OnInventoryTagUpdated(string ChangedTag, HashSet<int> TagHashSet)
+        protected virtual void OnInventoryTagUpdated(string ChangedTag, HashSet<TKey> TagHashSet)
         {
 
         }
