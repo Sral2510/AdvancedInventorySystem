@@ -66,6 +66,18 @@ namespace AIS
         {
             ID = id;
         }
+
+        public bool Equals(DefaultItem? other)
+        {
+            if (other is null) return false;
+            return ID == other.ID;
+        }
+
+        public override bool Equals(object? obj) => Equals(obj as DefaultItem);
+
+        public override int GetHashCode() => ID.GetHashCode();
+
+        public override string ToString() => $"Item({ID})";
     }
 
     public class DefaultItemData : IInventoryData<int>

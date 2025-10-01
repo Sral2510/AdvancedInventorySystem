@@ -130,8 +130,9 @@ namespace AIS
                     }
                     else
                     {
-                        SuccessfulCheckFlag = false;
-                        break;
+                        if ((dynamic)kvp.Value < 0)
+                            SuccessfulCheckFlag = false;
+                            break;
                     }
                 }
             }
@@ -227,10 +228,9 @@ namespace AIS
         {
             foreach (var kvp in CheckPair) 
             {
-                if(Inventory.TryGetValue(kvp.Key, out var dictionarydata))
-                { 
-                    if (!dictionarydata.Check(kvp.Value)) 
-                        { return false; }
+                if (!Inventory.TryGetValue(kvp.Key, out var dictionarydata) || !dictionarydata.Check(kvp.Value))
+                {
+                    return false;
                 }
             }
             return true;

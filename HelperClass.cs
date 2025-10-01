@@ -19,6 +19,11 @@ internal class AsyncBooleanGate
     private readonly object _lock = new();
     private TaskCompletionSource<bool> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    public AsyncBooleanGate() 
+    {
+        Open();
+    }
+
     public Task Wait() => _tcs.Task;
 
     public void Open()

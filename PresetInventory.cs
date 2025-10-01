@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace AIS
@@ -14,9 +15,15 @@ namespace AIS
     {
         private readonly InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData> _inventorySystem;
 
+        public event UpdatedInventoryHandler<DefaultItem> UpdatedInventory = delegate { };
+        public event UpdatedInventoryTagHandler<DefaultItem> UpdatedInventoryTag = delegate { };
+
         public DefaultIntInventory()
         {
             _inventorySystem = new InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData>();
+
+            _inventorySystem.UpdatedInventory += (changed) => UpdatedInventory(changed);
+            _inventorySystem.UpdatedInventoryTag += (tag, set) => UpdatedInventoryTag(tag, set);
         }
 
         public Task<bool> TryAddRemove(DefaultItem item, int Amount)
@@ -129,9 +136,9 @@ namespace AIS
     
     public class DefaultIntInventoryDisplay : IInventoryDisplaySystemWrapper<DefaultItem, DefaultItemData, int, IntInventorySaveData>
     {
-        protected readonly InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData> _inventorySystem;
+        protected readonly DefaultIntInventory _inventorySystem;
 
-        public DefaultIntInventoryDisplay(InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData> inventory)
+        public DefaultIntInventoryDisplay(DefaultIntInventory inventory)
         {
             _inventorySystem = inventory;
 
