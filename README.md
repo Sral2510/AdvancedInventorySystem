@@ -71,36 +71,25 @@ A fully asynchronous, event-driven inventory management system with built-in sup
 	{
 		static async Task Main()
 		{
-			var inventory = new InventorySystem();
-
-			// Subscribe to updates
-			inventory.UpdatedInventory += changedIds => 
-				Console.WriteLine($"Items changed: {string.Join(",", changedIds)}");
-			inventory.UpdatedInventoryTag += (tag, ids) => 
-				Console.WriteLine($"Tag '{tag}' updated: {string.Join(",", ids)}");
+			var inventory = new DefaultIntInventory();
 
 			// Add items
-			inventory.AddItem(1, 5);
-			inventory.AddItem(new List<KeyValuePair<int, int>> {
+			inventory.TryAddRemoveItem(1, 5);
+			inventory.TryAddRemoveItem(new List<KeyValuePair<int, int>> {
 				new(2, 10),
 				new(3, 15)
 			});
 
 			// Remove items
-			bool successSingle = await inventory.TryRemoveItem(1, 3);
+			bool successSingle = await inventory.TryAddRemoveItem(1, -3);
 			Console.WriteLine($"Single removal success: {successSingle}");
 
-			bool successMulti = await inventory.TryRemoveItem(new List<KeyValuePair<int, int>> {
-				new(2, 5),
-				new(3, 5)
+			bool successMulti = await inventory.TryAddRemoveItem(new List<KeyValuePair<int, int>> {
+				new(2, -5),
+				new(3, -5)
 			});
 			Console.WriteLine($"Multiple removal success: {successMulti}");
-
-			// Check inventory
-			bool hasItem1 = inventory.SingleItemCheck(1);
-			bool hasAll = inventory.MultiItemCheck(new List<int> { 2, 3 });
-			Console.WriteLine($"Has item 1: {hasItem1}, Has all items 2 & 3: {hasAll}");
-
+			
 			// Save and load
 			await inventory.Save("inventory.json");
 			await inventory.Load("inventory.json");
@@ -111,8 +100,6 @@ A fully asynchronous, event-driven inventory management system with built-in sup
 		}
 	}
 	
-	
-	```csharp
 	using AIS;
 	using AIS.Display;
 	using System;

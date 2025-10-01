@@ -44,6 +44,16 @@ namespace AIS.Interface
         void PauseProcess();
         void ContinueProcess();
     }
+    
+    public interface IInventoryDisplaySystemWrapper<TKey, TValue, TAmount, TSave>
+        where TKey : IItem
+        where TValue : IInventoryData<TAmount>, new()
+        where TAmount : struct
+        where TSave : ISaveData<TAmount>, new()
+    {
+        void OnInventoryUpdated(HashSet<TKey>);
+        void OnInventoryTagUpdated(string, HashSet<TKey>);
+    }
 }
 
 namespace AIS

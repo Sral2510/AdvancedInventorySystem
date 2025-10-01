@@ -9,28 +9,32 @@ public delegate void UpdatedInventoryTagHandler<TKey>(string ChangedTag, HashSet
 namespace AIS
 {
     /// <summary>
-    /// The Inventory System handeling the functionality of the Inventory.
-    /// Changes updated concurrently via a Channel allowing for async Add and Remove.
-    /// private set only allowing modifications with Add/Remove Functions.
-    /// public get will not include changes still awaiting to be processed.
+    /// The Inventory System handling the functionality of the Inventory.
+    /// Changes are updated concurrently via a Channel allowing for async Add and Remove.
+    /// The inventory can only be modified through Add/Remove functions.
     /// </summary>
+    /// <typeparam name="TKey">Typeparameter to identify the item to be stored (Key of Inventory Dictionary), must implement <see cref="IItem"/>.</typeparam>
+    /// <typeparam name="TValue">Typeparameter to store data in the inventory (Value of Inventory Dictionary), must implement <see cref="IInventoryData{TAmount}"/> and have a parameterless constructor.</typeparam>
+    /// <typeparam name="TAmount">Typeparameter for the quantity of items, must be a value type.</typeparam>
+    /// <typeparam name="TSave">Typeparameter to define the data to be saved, must implement <see cref="ISaveData{TAmount}"/> and have a parameterless constructor.</typeparam>
     public class InventorySystem<TKey, TValue, TAmount, TSave>
         where TKey : IItem
         where TValue : IInventoryData<TAmount>, new()
         where TAmount : struct
         where TSave : ISaveData<TAmount>, new()
     {
+
         /// <summary>
         /// Event triggered whenever the inventory is updated.
         /// </summary>
-        ///  /// <param name="ChangedID">The set of item IDs that were added, removed, or updated.</param>
+        /// <param name="ChangedItem">The set of items that were changed.</param>
         public event UpdatedInventoryHandler<TKey> UpdatedInventory = delegate { };
 
         /// <summary>
         /// Event triggered whenever items under a specific tag are updated.
         /// </summary>
         /// <param name="ChangedTag">The tag whose items were updated.</param>
-        /// <param name="TagHashSet">The set of all item IDs that belong to the updated tag.</param>
+        /// <param name="TagHashSet">The set of all items that belong to the updated tag.</param>
         public event UpdatedInventoryTagHandler<TKey> UpdatedInventoryTag = delegate { };
 
         internal Func<TSave, Dictionary<TKey, TValue>>? VersionControlFunction;
@@ -38,7 +42,7 @@ namespace AIS
         private readonly SemaphoreSlim _SaveLoadSemaphore = new(1, 1);
 
         /// <summary>
-        /// The current inventory mapping item IDs to their quantities.
+        /// The current inventory mapping items to their values including quantity.
         /// </summary>
         public Dictionary<TKey, TValue> Inventory { get; private set; } = new();
 
@@ -164,7 +168,7 @@ namespace AIS
         /// Checks if an item exists in the inventory.
         /// Does not consider changes still in the InventoryChannel queue.
         /// </summary>
-        /// <param name="ID">The item ID to check.</param>
+        /// <param name="item">The item to check.</param>
         /// <returns>True if the item exists, false otherwise</returns>
         public bool SingleItemCheck(TKey item)
         {
@@ -175,8 +179,8 @@ namespace AIS
         /// Checks if an item exists and its quantity is greater than a given amount.
         /// Does not consider changes still in the InventoryChannel queue.
         /// </summary>
-        /// <param name="ID">The item ID to check.</param>
-        /// <param name="GreaterThan">Minimum quantity required.</param>
+        /// <param name="item">The item ID to check.</param>
+        /// <param name="CompareAmount">Minimum quantity required.</param>
         /// <returns>True if the quantity is greater than the specified amount.</returns>
         public bool SingleItemCheck(TKey item, TAmount CompareAmount)
         {
@@ -194,8 +198,8 @@ namespace AIS
         /// Checks if all specified items exist in the inventory.
         /// Does not consider changes still in the InventoryChannel queue.
         /// </summary>
-        /// <param name="ID">List of item IDs to check.</param>
-        /// <returns>True if all items exist, false otherwise.</returns>
+        /// <param name="items">List of items to check.</param>
+        /// <returns>True if all items exist.</returns>
         public bool MultiItemCheck(List<TKey> item)
         {
             return MultiItemCheck(item, default);
@@ -205,8 +209,8 @@ namespace AIS
         /// Checks if all specified items exist and exceed the given quantity.
         /// Does not consider changes still in the InventoryChannel queue.
         /// </summary>
-        /// <param name="ID">List of item IDs to check.</param>
-        /// <param name="GreaterThan">Minimum quantity required for each item.</param>
+        /// <param name="item">List of items to check.</param>
+        /// <param name="CompareAmount">Minimum quantity required for each item.</param>
         /// <returns>True if all items meet the quantity requirement.</returns>
         public bool MultiItemCheck(List<TKey> item, TAmount CompareAmount)
         {
@@ -217,7 +221,7 @@ namespace AIS
         /// Checks if multiple items meet their respective minimum quantities.
         /// Does not consider changes still in the InventoryChannel queue.
         /// </summary>
-        /// <param name="CheckPair">List of item ID and quantity pairs.</param>
+        /// <param name="CheckPair">List of item and quantity pairs.</param>
         /// <returns>True if all items meet the required quantity.</returns>
         public bool MultiItemCheck(List<KeyValuePair<TKey, TAmount>> CheckPair) 
         {
@@ -293,7 +297,7 @@ namespace AIS
         }
 
         /// <summary>
-        /// Sets a custom version control function to convert old save files to the current format.
+        /// Sets a custom version control function to handle non default save files and/or update old saves to new format.
         /// </summary>
         /// <param name="versionControlFunction">A function taking an old save and returning a current inventory dictionary.</param>
         public void SetVersionControlFunction(Func<TSave, Dictionary<TKey, TValue>> versionControlFunction)
@@ -304,7 +308,7 @@ namespace AIS
         /// <summary>
         /// Sets the tag lookup table for items.
         /// </summary>
-        /// <param name="ExternalTagLookUpTable">Dictionary mapping item IDs to tags.</param>
+        /// <param name="ExternalTagLookUpTable">Dictionary mapping items to tags.</param>
         public void SetTagLookUpTable(Dictionary<TKey, string> ExternalTagLookUpTable) 
         {
             TagLookUpTable = ExternalTagLookUpTable;
@@ -473,7 +477,7 @@ namespace AIS.Display
         /// <summary>
         /// Called whenever the inventory is updated.
         /// </summary>
-        /// <param name="ChangedID">The set of item IDs that were added, removed, or modified.</param>
+        /// <param name="ChangedItem">The set of items that were changed.</param>
         protected virtual void OnInventoryUpdated(HashSet<TKey> ChangedItem)
         {
 
@@ -483,7 +487,7 @@ namespace AIS.Display
         /// Called whenever an Item with a tag in the inventory is updated.
         /// </summary>
         /// <param name="ChangedTag">The tag that was updated.</param>
-        /// <param name="TagHashSet">The set of all item IDs under the tag.</param>
+        /// <param name="TagHashSet">The set of all items under the tag.</param>
         protected virtual void OnInventoryTagUpdated(string ChangedTag, HashSet<TKey> TagHashSet)
         {
 
