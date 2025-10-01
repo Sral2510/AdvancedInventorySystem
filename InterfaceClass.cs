@@ -51,8 +51,8 @@ namespace AIS.Interface
         where TAmount : struct
         where TSave : ISaveData<TAmount>, new()
     {
-        void OnInventoryUpdated(HashSet<TKey>);
-        void OnInventoryTagUpdated(string, HashSet<TKey>);
+        void OnInventoryUpdated(HashSet<TKey> ChangedItem);
+        void OnInventoryTagUpdated(string Tag, HashSet<TKey> TagHashSet);
     }
 }
 

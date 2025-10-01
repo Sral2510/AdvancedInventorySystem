@@ -14,9 +14,14 @@ namespace AIS
     {
         private readonly InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData> _inventorySystem;
 
-        public DefaultInventory()
+        public DefaultIntInventory()
         {
             _inventorySystem = new InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData>();
+        }
+
+        public Task<bool> TryAddRemove(DefaultItem item, int Amount)
+        {
+            return _inventorySystem.TryAddRemoveItem(item, Amount);
         }
 
         /// <summary>
@@ -36,13 +41,18 @@ namespace AIS
         /// </summary>
         /// <param name="ChangeList">List of item id and amount pairs.</param>
         /// <returns>True if all changes succeeded</returns>
-        public Task<bool> TryAddRemoveItem(List<KeyValuePair<int, int>> ChangeList)
+        public Task<bool> TryAddRemove(List<KeyValuePair<int, int>> ChangeList)
         {
             var convertedChangeList = ChangeList
                 .Select(kvp => new KeyValuePair<DefaultItem, int>(new DefaultItem(kvp.Key), kvp.Value))
                 .ToList();
-            
-            return _inventorySystem.TryAddRemoveItem(convertedChangeList)
+
+            return _inventorySystem.TryAddRemoveItem(convertedChangeList);
+        }
+
+        public int GetQuantity(DefaultItem item)
+        {
+            return _inventorySystem.Inventory.TryGetValue(item, out var data) ? data.Quantity : 0;
         }
 
         /// <summary>
@@ -52,14 +62,14 @@ namespace AIS
         /// <returns>Value of quantity</returns>
         public int GetQuantity(int ID)
         {
-            return _inventorySystem.Inventory.TryGetValue(item, out var data) ? data.Quantity : 0;
+            return _inventorySystem.Inventory.TryGetValue(new DefaultItem(ID), out var data) ? data.Quantity : 0;
         }
 
         /// <summary>
         /// Retrieve a snapshot of the Inventory as a Dictionary with (int)id key and (int)quantity value
         /// </summary>
         /// <returns>Dicitionary with int key and int value</returns>
-        public Dictionary<int, int> GetInventorySnapshot()
+        public Dictionary<int, int> GetIntInventorySnapshot()
         {
             var snapshot = new Dictionary<int, int>();
             foreach (var kvp in _inventorySystem.Inventory)
@@ -68,13 +78,23 @@ namespace AIS
             }
             return snapshot;
         }
-        
+
+        public Dictionary<DefaultItem, int> GetInventorySnapshot()
+        {
+            var snapshot = new Dictionary<DefaultItem, int>();
+            foreach (var kvp in _inventorySystem.Inventory)
+            {
+                snapshot[kvp.Key] = kvp.Value.Quantity;
+            }
+            return snapshot;
+        }
+
         public void SetTagLookUpTable(Dictionary<int, string> ExternalTagLookUpTable) 
         {
             var changedExternalTagLookUpTable = ExternalTagLookUpTable.ToDictionary(
                 kvp => new DefaultItem(kvp.Key),
                 kvp => kvp.Value
-            )
+            );
             _inventorySystem.SetTagLookUpTable(changedExternalTagLookUpTable);
         }
         
@@ -109,9 +129,9 @@ namespace AIS
     
     public class DefaultIntInventoryDisplay : IInventoryDisplaySystemWrapper<DefaultItem, DefaultItemData, int, IntInventorySaveData>
     {
-        protected readonly InventorySystem<TKey, TValue, TAmount, TSave> _inventorySystem;
+        protected readonly InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData> _inventorySystem;
 
-        public InventoryDisplay(InventorySystem<TKey, TValue, TAmount, TSave> inventory)
+        public DefaultIntInventoryDisplay(InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData> inventory)
         {
             _inventorySystem = inventory;
 
@@ -123,7 +143,7 @@ namespace AIS
         /// Called whenever the inventory is updated.
         /// </summary>
         /// <param name="ChangedItem">The set of items that were changed.</param>
-        protected virtual void OnInventoryUpdated(HashSet<TKey> ChangedItem)
+        public virtual void OnInventoryUpdated(HashSet<DefaultItem> ChangedItem)
         {
 
         }
@@ -133,7 +153,7 @@ namespace AIS
         /// </summary>
         /// <param name="ChangedTag">The tag that was updated.</param>
         /// <param name="TagHashSet">The set of all items under the tag.</param>
-        protected virtual void OnInventoryTagUpdated(string ChangedTag, HashSet<TKey> TagHashSet)
+        public virtual void OnInventoryTagUpdated(string ChangedTag, HashSet<DefaultItem> TagHashSet)
         {
 
         }
