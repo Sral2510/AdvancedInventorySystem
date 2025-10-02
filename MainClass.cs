@@ -130,7 +130,7 @@ namespace AIS
                     }
                     else
                     {
-                        if ((dynamic)kvp.Value < 0)
+                        if ((dynamic)kvp.Value < default(TAmount))
                             SuccessfulCheckFlag = false;
                             break;
                     }
