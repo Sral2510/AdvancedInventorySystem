@@ -80,28 +80,29 @@ namespace AIS
         public override string ToString() => $"Item({ID})";
     }
 
-    public class DefaultItemData : IInventoryData<int>
+    public class DefaultItemData<TAmount> : IInventoryData<TAmount>
+        where TAmount : struct
     {
-        public int Quantity { get; set; } = 0;
+        public TAmount Quantity { get; set; } = default;
 
         public DefaultItemData()
         {
 
         }
 
-        public void Add(int Amount)
+        public void Add(TAmount Amount)
         {
-            Quantity += Amount;
+            Quantity = (dynamic)Quantity + (dynamic)Amount;
         }
 
-        public bool Check(int Amount)
+        public bool Check(TAmount Amount)
         {
-            return Quantity >= Amount;
+            return (dynamic)Quantity >= (dynamic)Amount;
         }
 
         public bool ZeroCheck()
         {
-            return Quantity <= 0;
+            return (dynamic)Quantity <= default(TAmount);
         }
     }
 
@@ -110,7 +111,7 @@ namespace AIS
     /// Contains the version of the save file and a snapshot of all item quantities.
     /// Use this class when saving or loading inventory to/from JSON files.
     /// </summary>
-    public class IntInventorySaveData : ISaveData<int>
+    public class DefaultInventorySaveData<TAmount> : ISaveData<TAmount>
     {
         /// <summary>
         /// The version of the save data.
@@ -120,28 +121,28 @@ namespace AIS
         /// <summary>
         /// A dictionary mapping item IDs to their quantities.
         /// </summary>
-        public Dictionary<int, int> Inventory { get; set; } = new();
+        public Dictionary<int, TAmount> Inventory { get; set; } = new();
 
-        public void Initialize(string version, Dictionary<IItem, IInventoryData<int>> inventory)
+        public void Initialize(string version, Dictionary<IItem, IInventoryData<TAmount>> inventory)
         {
             Version = version;
             Inventory = inventory.ToDictionary
                 (
-                    kvp => kvp.Key.ID,                         // Key: item ID
-                    kvp => Convert.ToInt32(kvp.Value.Quantity) // Value: quantity as int
+                    kvp => kvp.Key.ID,
+                    kvp => (TAmount)kvp.Value.Quantity
                 );
         }
 
-        public Dictionary<IItem, IInventoryData<int>> GetInventory()
+        public Dictionary<IItem, IInventoryData<TAmount>> GetInventory()
         {
             return Inventory.ToDictionary(
                 kvp => (IItem)new DefaultItem(kvp.Key),
-                kvp => (IInventoryData<int>)new DefaultItemData { Quantity = kvp.Value }
+                kvp => (IInventoryData<TAmount>)new DefaultItemData<TAmount> { Quantity = kvp.Value }
             );
         }
 
 
-        public IntInventorySaveData()
+        public DefaultInventorySaveData()
         {
 
         }

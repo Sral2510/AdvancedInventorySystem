@@ -8,25 +8,23 @@ using System.Threading.Tasks;
 
 namespace AIS
 {
-    /// <summary>
-    /// Default Implementation of an InventorySystem that has a Dictionary where the (int)ID of the item stored gets asigned a (int)quantity.
-    /// </summary>
-    public class DefaultIntInventory : IInventorySystemWrapper<DefaultItem, DefaultItemData, int, IntInventorySaveData>
+    public class DefaultInventory<TAmount> : IInventorySystemWrapper<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>>
+        where TAmount : struct
     {
-        private readonly InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData> _inventorySystem;
+        private readonly InventorySystem<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>> _inventorySystem;
 
         public event UpdatedInventoryHandler<DefaultItem> UpdatedInventory = delegate { };
         public event UpdatedInventoryTagHandler<DefaultItem> UpdatedInventoryTag = delegate { };
 
-        public DefaultIntInventory()
+        public DefaultInventory()
         {
-            _inventorySystem = new InventorySystem<DefaultItem, DefaultItemData, int, IntInventorySaveData>();
+            _inventorySystem = new InventorySystem<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>>();
 
             _inventorySystem.UpdatedInventory += (changed) => UpdatedInventory(changed);
             _inventorySystem.UpdatedInventoryTag += (tag, set) => UpdatedInventoryTag(tag, set);
         }
 
-        public Task<bool> TryAddRemove(DefaultItem item, int Amount)
+        public Task<bool> TryAddRemove(DefaultItem item, TAmount Amount)
         {
             return _inventorySystem.TryAddRemoveItem(item, Amount);
         }
@@ -37,7 +35,7 @@ namespace AIS
         /// <param name="ID">The item id to be changed.</param>
         /// <param name="Amount">The amount to add/remove.</param>
         /// <returns>True if change succeeded</returns>
-        public Task<bool> TryAddRemove(int ID, int Amount)
+        public Task<bool> TryAddRemove(int ID, TAmount Amount)
         {
             return _inventorySystem.TryAddRemoveItem(new DefaultItem(ID), Amount);
         }
@@ -48,18 +46,18 @@ namespace AIS
         /// </summary>
         /// <param name="ChangeList">List of item id and amount pairs.</param>
         /// <returns>True if all changes succeeded</returns>
-        public Task<bool> TryAddRemove(List<KeyValuePair<int, int>> ChangeList)
+        public Task<bool> TryAddRemove(List<KeyValuePair<int, TAmount>> ChangeList)
         {
             var convertedChangeList = ChangeList
-                .Select(kvp => new KeyValuePair<DefaultItem, int>(new DefaultItem(kvp.Key), kvp.Value))
+                .Select(kvp => new KeyValuePair<DefaultItem, TAmount>(new DefaultItem(kvp.Key), kvp.Value))
                 .ToList();
 
             return _inventorySystem.TryAddRemoveItem(convertedChangeList);
         }
 
-        public int GetQuantity(DefaultItem item)
+        public TAmount GetQuantity(DefaultItem item)
         {
-            return _inventorySystem.Inventory.TryGetValue(item, out var data) ? data.Quantity : 0;
+            return _inventorySystem.Inventory.TryGetValue(item, out var data) ? data.Quantity : default;
         }
 
         /// <summary>
@@ -67,18 +65,18 @@ namespace AIS
         /// </summary>
         /// <param name="ID">item id to be retrieved</param>
         /// <returns>Value of quantity</returns>
-        public int GetQuantity(int ID)
+        public TAmount GetQuantity(int ID)
         {
-            return _inventorySystem.Inventory.TryGetValue(new DefaultItem(ID), out var data) ? data.Quantity : 0;
+            return _inventorySystem.Inventory.TryGetValue(new DefaultItem(ID), out var data) ? data.Quantity : default;
         }
 
         /// <summary>
         /// Retrieve a snapshot of the Inventory as a Dictionary with (int)id key and (int)quantity value
         /// </summary>
         /// <returns>Dicitionary with int key and int value</returns>
-        public Dictionary<int, int> GetIntInventorySnapshot()
+        public Dictionary<int, TAmount> GetIntInventorySnapshot()
         {
-            var snapshot = new Dictionary<int, int>();
+            var snapshot = new Dictionary<int, TAmount>();
             foreach (var kvp in _inventorySystem.Inventory)
             {
                 snapshot[kvp.Key.ID] = kvp.Value.Quantity;
@@ -86,9 +84,9 @@ namespace AIS
             return snapshot;
         }
 
-        public Dictionary<DefaultItem, int> GetInventorySnapshot()
+        public Dictionary<DefaultItem, TAmount> GetInventorySnapshot()
         {
-            var snapshot = new Dictionary<DefaultItem, int>();
+            var snapshot = new Dictionary<DefaultItem, TAmount>();
             foreach (var kvp in _inventorySystem.Inventory)
             {
                 snapshot[kvp.Key] = kvp.Value.Quantity;
@@ -132,13 +130,47 @@ namespace AIS
         {
             _inventorySystem.ResumeProcessing();
         }
+        
+        public bool SingleItemCheck(int ID, TAmount compareAmount = default)
+        {
+            return _inventorySystem.SingleItemCheck(new DefaultItem(ID), compareAmount);
+        }
+        
+        public bool MultiItemCheck(List<int> IDs, TAmount compareAmount = default)
+        {
+            var converted = IDs.Select(id => new DefaultItem(id)).ToList();
+            return _inventorySystem.MultiItemCheck(converted, compareAmount);
+        }
+    
+        public bool MultiItemCheck(List<KeyValuePair<int, TAmount>> checkPairs)
+        {
+            var converted = checkPairs
+                .Select(kvp => new KeyValuePair<DefaultItem, TAmount>(new DefaultItem(kvp.Key), kvp.Value))
+                .ToList();
+    
+            return _inventorySystem.MultiItemCheck(converted);
+        }
     }
     
-    public class DefaultIntInventoryDisplay : IInventoryDisplaySystemWrapper<DefaultItem, DefaultItemData, int, IntInventorySaveData>
+    /// <summary>
+    /// Default Implementation of an InventorySystem that has a Dictionary where the (int)ID of the item stored gets asigned a (int)quantity.
+    /// </summary>
+    public class DefaultIntInventory : DefaultInventory<int>
     {
-        protected readonly DefaultIntInventory _inventorySystem;
+        
+    }
+    
+    public class DefaultFloatInventory : DefaultInventory<float>
+    {
+        
+    }
+    
+    public class DefaultInventoryDisplay<TAmount> : IInventoryDisplaySystemWrapper<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>>
+        where TAmount : struct
+    {
+        protected readonly DefaultInventory<TAmount> _inventorySystem;
 
-        public DefaultIntInventoryDisplay(DefaultIntInventory inventory)
+        public DefaultInventoryDisplay(DefaultInventory<TAmount> inventory)
         {
             _inventorySystem = inventory;
 
@@ -165,4 +197,21 @@ namespace AIS
 
         }
     }
+    
+    public class DefaultIntInventoryDisplay : DefaultInventoryDisplay<int>
+    {
+        public DefaultIntInventoryDisplay(DefaultIntInventory inventory)
+            : base(inventory)
+        {
+        }
+    }
+    
+    public class DefaultIntInventoryDisplay : DefaultInventoryDisplay<float>
+    {
+        public DefaultIntInventoryDisplay(DefaultFloatInventory inventory)
+            : base(inventory)
+        {
+        }
+    }
 }
+    
