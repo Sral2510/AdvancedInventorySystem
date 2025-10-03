@@ -112,6 +112,7 @@ namespace AIS
     /// Use this class when saving or loading inventory to/from JSON files.
     /// </summary>
     public class DefaultInventorySaveData<TAmount> : ISaveData<TAmount>
+        where TAmount : struct
     {
         /// <summary>
         /// The version of the save data.

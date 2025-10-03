@@ -206,9 +206,9 @@ namespace AIS
         }
     }
     
-    public class DefaultIntInventoryDisplay : DefaultInventoryDisplay<float>
+    public class DefaultFloatInventoryDisplay : DefaultInventoryDisplay<float>
     {
-        public DefaultIntInventoryDisplay(DefaultFloatInventory inventory)
+        public DefaultFloatInventoryDisplay(DefaultFloatInventory inventory)
             : base(inventory)
         {
         }
