@@ -12,7 +12,7 @@ A fully asynchronous, event-driven inventory management system with built-in sup
 - **Unified Add/Remove Function**
   - `TryAddRemove(int itemId, int amount)` – Add (positive amount) or remove (negative amount) a single item asynchronously.  
   - `TryAddRemove(List<KeyValuePair<int, int>> changeList)` – Add/remove multiple items asynchronously.  
-  **All removals are atomic:** if any removal fails, none are applied.
+  All changes are atomic: if any check in the list of changes fails, none are applied.
 
 - **Force Operations**
   - `ForceAddRemoveItem(int itemId, int amount)` bypasses checks.
