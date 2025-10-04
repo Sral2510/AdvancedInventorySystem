@@ -12,22 +12,22 @@ namespace AIS.Interface
         int ID { get; }
     }
 
-    public interface IInventoryData<T>
+    public interface IInventoryData<TAmount>
     {
-        T Quantity { get; }
+        TAmount Quantity { get; }
 
-        void Add(T amount);
-        bool Check(T amount);
+        void Add(TAmount amount);
+        bool Check(TAmount amount);
         bool ZeroCheck();
     }
 
-    public interface ISaveData<T>
+    public interface ISaveData<TAmount>
     {
         string Version { get; set; }
 
 
-        void Initialize(string version, Dictionary<IItem, IInventoryData<T>> inventory);
-        Dictionary<IItem, IInventoryData<T>> GetInventory();
+        void Initialize(string version, Dictionary<IItem, IInventoryData<TAmount>> inventory);
+        Dictionary<IItem, IInventoryData<TAmount>> GetInventory();
     }
 
     public interface IInventorySystemWrapper<TKey, TValue, TAmount, TSave>
