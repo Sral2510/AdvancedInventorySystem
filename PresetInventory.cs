@@ -8,17 +8,17 @@ using System.Threading.Tasks;
 
 namespace AIS
 {
-    public class DefaultInventory<TAmount> : IInventorySystemWrapper<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>>
+    public class DefaultInventory<TAmount> : IInventorySystemWrapper<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<DefaultItem, DefaultItemData<TAmount>, TAmount>>
         where TAmount : struct
     {
-        private readonly InventorySystem<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>> _inventorySystem;
+        private readonly InventorySystem<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<DefaultItem, DefaultItemData<TAmount>, TAmount>> _inventorySystem;
 
         public event UpdatedInventoryHandler<DefaultItem> UpdatedInventory = delegate { };
         public event UpdatedInventoryTagHandler<DefaultItem> UpdatedInventoryTag = delegate { };
 
         public DefaultInventory()
         {
-            _inventorySystem = new InventorySystem<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>>();
+            _inventorySystem = new InventorySystem<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<DefaultItem, DefaultItemData<TAmount>, TAmount>>();
 
             _inventorySystem.UpdatedInventory += (changed) => UpdatedInventory(changed);
             _inventorySystem.UpdatedInventoryTag += (tag, set) => UpdatedInventoryTag(tag, set);
@@ -165,7 +165,7 @@ namespace AIS
         
     }
     
-    public class DefaultInventoryDisplay<TAmount> : IInventoryDisplaySystemWrapper<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<TAmount>>
+    public class DefaultInventoryDisplay<TAmount> : IInventoryDisplaySystemWrapper<DefaultItem, DefaultItemData<TAmount>, TAmount, DefaultInventorySaveData<DefaultItem, DefaultItemData<TAmount>, TAmount>>
         where TAmount : struct
     {
         protected readonly DefaultInventory<TAmount> _inventorySystem;

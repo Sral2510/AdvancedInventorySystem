@@ -21,7 +21,7 @@ namespace AIS
         where TKey : IItem
         where TValue : IInventoryData<TAmount>, new()
         where TAmount : struct
-        where TSave : ISaveData<TAmount>, new()
+        where TSave : ISaveData<TKey, TValue, TAmount>, new()
     {
 
         /// <summary>
@@ -65,14 +65,9 @@ namespace AIS
             });
         }
 
-        private async Task FlushChannel()
+        private void FlushChannel()
         {
             while (_InventoryChannel.Reader.TryRead(out _)) { }
-
-            while (await _InventoryChannel.Reader.WaitToReadAsync())
-            {
-                while (_InventoryChannel.Reader.TryRead(out _)) { }
-            }
         }
 
         private async Task AwaitCurrentChannelQueue()
@@ -249,7 +244,7 @@ namespace AIS
                 new(ChangeItem, Amount)
             };
 
-            AddRemoveItem(ChangeList);
+            ForceAddRemoveItem(ChangeList);
         }
 
         /// <summary>
@@ -257,7 +252,7 @@ namespace AIS
         /// Bypasses any Check on if the inventory accepts the change.
         /// </summary>
         /// <param name="ChangeList">List of item and amount pairs.</param>
-        public void AddRemoveItem(List<KeyValuePair<TKey, TAmount>> ChangeList) 
+        public void ForceAddRemoveItem(List<KeyValuePair<TKey, TAmount>> ChangeList) 
         {
             _InventoryChannel.Writer.TryWrite(new InventoryChange<TKey, TAmount>(ChangeList));
         }
@@ -346,6 +341,10 @@ namespace AIS
             {
                 await SaveSubroutine(FilePath, GameVersion);
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Save error: {ex}");
+            }
             finally
             {
                 _SaveLoadSemaphore.Release();
@@ -370,12 +369,8 @@ namespace AIS
             TSave saveData = new();
             saveData.Initialize(GameVersion, inventorySnapshot);
 
-            string TempFilePath = $"{FilePath}.tmp";
-            string BackupFilePath = $"{FilePath}.bak";
-
             var json = JsonSerializer.Serialize(saveData, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(TempFilePath, json);
-            File.Replace(TempFilePath, FilePath, BackupFilePath);
+            await File.WriteAllTextAsync(FilePath, json);
         }
 
         /// <summary>
@@ -388,6 +383,10 @@ namespace AIS
             try 
             {
                 await LoadSubroutine(FilePath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Load error: {ex}");
             }
             finally 
             {
@@ -404,18 +403,20 @@ namespace AIS
             var saveData = JsonSerializer.Deserialize<TSave>(json);
             if (saveData == null) return;
 
-            await FlushChannel();
+            FlushChannel();
 
             lock (Inventory)
             {
+                Inventory.Clear();
+
                 switch (saveData.Version)
                 {
                     case Constants.BaseVersion:
-                        Inventory = new Dictionary<TKey, TValue>(saveData.GetInventory()
-                            .ToDictionary(
-                                kvp => (TKey)kvp.Key,
-                                kvp => (TValue)kvp.Value
-                            ));
+                        var changeList = saveData
+                            .GetInventory()
+                            .Select(kvp => new KeyValuePair<TKey, TAmount>(kvp.Key, kvp.Value.Quantity))
+                            .ToList();
+                        ForceAddRemoveItem(changeList);
                         break;
 
                     default:
@@ -462,7 +463,7 @@ namespace AIS.Display
         where TKey : IItem, new()
         where TValue : IInventoryData<TAmount>, new()
         where TAmount : struct
-        where TSave : ISaveData<TAmount>, new()
+        where TSave : ISaveData<TKey, TValue, TAmount>, new()
     {
         protected readonly InventorySystem<TKey, TValue, TAmount, TSave> _InventorySystem;
 

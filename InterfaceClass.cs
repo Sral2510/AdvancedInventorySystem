@@ -21,20 +21,22 @@ namespace AIS.Interface
         bool ZeroCheck();
     }
 
-    public interface ISaveData<TAmount>
+    public interface ISaveData<TKey, TValue, TAmount>
+        where TKey: IItem
+        where TValue : IInventoryData<TAmount>
     {
         string Version { get; set; }
 
 
         void Initialize(string version, Dictionary<IItem, IInventoryData<TAmount>> inventory);
-        Dictionary<IItem, IInventoryData<TAmount>> GetInventory();
+        Dictionary<TKey, TValue> GetInventory();
     }
 
     public interface IInventorySystemWrapper<TKey, TValue, TAmount, TSave>
         where TKey : IItem
         where TValue : IInventoryData<TAmount>, new()
         where TAmount : struct
-        where TSave : ISaveData<TAmount>, new()
+        where TSave : ISaveData<TKey, TValue, TAmount>, new()
     {
         Task<bool> TryAddRemove(TKey Item, TAmount Amount);
         TAmount GetQuantity(TKey Item);
@@ -49,7 +51,7 @@ namespace AIS.Interface
         where TKey : IItem
         where TValue : IInventoryData<TAmount>, new()
         where TAmount : struct
-        where TSave : ISaveData<TAmount>, new()
+        where TSave : ISaveData<TKey, TValue, TAmount>, new()
     {
         void OnInventoryUpdated(HashSet<TKey> ChangedItem);
         void OnInventoryTagUpdated(string Tag, HashSet<TKey> TagHashSet);
@@ -111,7 +113,9 @@ namespace AIS
     /// Contains the version of the save file and a snapshot of all item quantities.
     /// Use this class when saving or loading inventory to/from JSON files.
     /// </summary>
-    public class DefaultInventorySaveData<TAmount> : ISaveData<TAmount>
+    public class DefaultInventorySaveData<TKey, TValue, TAmount> : ISaveData<TKey, TValue, TAmount>
+        where TKey: IItem
+        where TValue : IInventoryData<TAmount>
         where TAmount : struct
     {
         /// <summary>
@@ -134,12 +138,20 @@ namespace AIS
                 );
         }
 
-        public Dictionary<IItem, IInventoryData<TAmount>> GetInventory()
+        public Dictionary<TKey, TValue> GetInventory()
         {
-            return Inventory.ToDictionary(
-                kvp => (IItem)new DefaultItem(kvp.Key),
-                kvp => (IInventoryData<TAmount>)new DefaultItemData<TAmount> { Quantity = kvp.Value }
-            );
+            var result = new Dictionary<TKey, TValue>();
+
+            foreach (var kvp in Inventory)
+            {
+                var item = (TKey)Activator.CreateInstance(typeof(TKey), kvp.Key)!;
+                var data = (TValue)Activator.CreateInstance(typeof(TValue))!;
+                data.Add(kvp.Value);
+
+                result[item] = data;
+            }
+
+            return result;
         }
 
 
